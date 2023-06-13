@@ -13,7 +13,7 @@ const randomAETitle = () => {
     return aetitle
 }
 
-const blankNet = { name: '', nodes: [], edges: [], mirror: { enabled: false, host: '', apiport: 8080, apiprotocol: 'http' } }
+const blankNet = { name: '', nodes: [], edges: [], mirror: { enabled: false, host: '', apiport: 8383, apiprotocol: 'http', scpport: 6060 } }
 const Welcome = (props) => {
     const [state, setState] = useState('welcome')
     const [net, setNet] = useState({...blankNet, aetitle: randomAETitle()})

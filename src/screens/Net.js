@@ -1,6 +1,7 @@
 import React, {useState} from 'react'
 import {ButtonGroup, Button, Dropdown, Form, Modal, Badge, Table} from 'react-bootstrap'
 import ReactFlow, {Background, Controls, MarkerType} from 'reactflow'
+import Audit from '../components/Audit'
 import 'reactflow/dist/style.css'
 import '../style/Net.css'
 
@@ -19,6 +20,7 @@ const Net = (props) => {
     const [showNewNode, setShowNewNode] = useState(false)
     const [files, setFiles] = useState([])
     const [showFiles, setShowFiles] = useState(false)
+    const [audit, setAudit] = useState({ show: false })
     
     const newNode = () => {
         setShowNewNode(true)
@@ -74,10 +76,7 @@ const Net = (props) => {
     }
 
     const updateFilesCount = () => {
-        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file?count=1`, {}, count => {
-            setNode({...node, filesCount: count ? count : 0})
-            console.log(node)
-        })
+        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file?count=1`, {}, count => setNode({...node, filesCount: count ? count : 0}))
     }
 
     const startSCP = () => {
@@ -132,9 +131,8 @@ const Net = (props) => {
     }
 
     const onConnect = (params) => {
-        console.log(params)
         const edge = {
-            id: `${params.source}-${params.target}`,
+            id: `${params.source} => ${params.target}`,
             source: params.source,
             target: params.target,
             markerEnd: { type: MarkerType.ArrowClosed },
@@ -144,7 +142,55 @@ const Net = (props) => {
         const edges = net.edges.filter(e => e.id !== edge.id)
         edges.push({ ...edge })
         updateNet({ ...net, edges })
-        console.log(net)
+    }
+
+    const onEdgeClick = (event, edge) =>{
+        props.setModal({
+            show: true, 
+            title: 'Remove connection?', 
+            text: edge.id, 
+            handleOk: () => {
+                const edges = net.edges.filter(e => e.id !== edge.id)
+                updateNet({ ...net, edges })
+            },
+            handleCancel: () => props.setModal({show: false})
+        })
+    }
+
+    const auditNetwork = () => {
+        props.setModal({
+            show: true, 
+            title: 'Network Audit', 
+            text: 'Checks if any node has failed to synchronize DCM files', 
+            handleOk: () => {
+                console.log('audit-------------------------')
+                const d = new Date()
+                const now = `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`
+                const items = []
+                const headers = { name: '-' }
+                net.nodes.forEach(node => headers[node.name] = '-')
+                net.nodes.forEach(node => {
+                    dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file`, {}, files => {
+                        if(files){
+                            for(const file of files){
+                                const { name, created } = file
+                                const found = items.find(i => i.name === name)
+                                if(found)
+                                    found[node.name] = created
+                                else {
+                                    const auditItem = { ...headers, name: file.name }
+                                    auditItem[node.name] = created
+                                    items.push(auditItem)
+                                }
+                            }
+                            setAudit({...audit, show: true, name: net.name, now, headers, items: [...items]})
+                        }
+                    })
+                })
+                props.setModal({show: false})
+            },
+            handleCancel: () => props.setModal({show: false})
+        })
     }
 
     return (
@@ -159,8 +205,8 @@ const Net = (props) => {
                 <Dropdown.Item onClick={openMirror}>
                     <strong>Mirror</strong>
                 </Dropdown.Item>
-                <Dropdown.Item onClick={()=>alert('sync')}>
-                    <strong>Audit files</strong>
+                <Dropdown.Item onClick={auditNetwork}>
+                    <strong>Audit network</strong>
                 </Dropdown.Item>
                 <Dropdown.Item onClick={exitNet}>
                     <strong>Exit</strong>
@@ -207,10 +253,14 @@ const Net = (props) => {
                 <Modal.Body>
                     <Form.Group style={{marginTop: 10, marginBottom:10}}>
                         <Form.Check type="switch" label="Lacking external IP address (use mirror)" id="mirrored" defaultChecked={node.mirrored}
-                            onChange={e => setNode({...node, mirrored: e.target.checked})} />
-                        <Form.Text className="text-muted">
-                            A mirror server must be previously configured
-                        </Form.Text>
+                            onChange={e => setNode({...node, mirrored: e.target.checked})} disabled={!net.mirror.enabled} />
+                        {
+                            !net.mirror.enabled && (
+                                <span className="red-text">
+                                    Mirror server must be enabled to use this feature
+                                </span>
+                            )
+                        }
                     </Form.Group>
                     {
                         node.mirrored && (
@@ -312,8 +362,8 @@ const Net = (props) => {
                 <Modal.Header closeButton>
                     <Modal.Title>{node.name + ' (' + files.length + ' files)'}</Modal.Title>
                 </Modal.Header>
-                <Modal.Body>
-                    <Table size="sm" style={{fontSize: 'smaller'}} responsive={true} striped bordered hover>
+                <Modal.Body style={{maxHeight: 500, overflow: 'auto'}}>
+                    <Table size="sm" responsive={true} striped bordered hover style={{fontSize: 'smaller'}}>
                         <thead>
                             <tr>
                                 <th>SOP Instance UID</th>
@@ -368,7 +418,7 @@ const Net = (props) => {
                                         <Form.Control maxLength={5} value={mirror.apiport} size="sm" style={{width:100}}
                                             onChange={e => setMirror({...mirror, apiport: e.target.value.replace(/[^0-9]/g,'') })} />
                                         <Form.Text className="text-muted">
-                                            {mirror.apiport.toString().length} / 5 * ex: 8080
+                                            {mirror.apiport.toString().length} / 5 * ex: 8383
                                         </Form.Text>
                                     </div>
                                     <div>
@@ -378,6 +428,14 @@ const Net = (props) => {
                                         <Form.Check style={{display:'inline-block', paddingRight:20}} label='https' name='apiprotocol' value='https' type='radio' 
                                             defaultChecked={mirror.apiprotocol === 'https'} onChange={(e) => setMirror({...mirror, apiprotocol: e.target.value })} />
                                     </div>
+                                </Form.Group>
+                                <Form.Group style={{marginTop: 10, marginBottom:10}}>
+                                    <Form.Label>Mirror SCP Port</Form.Label>
+                                    <Form.Control maxLength={5} value={mirror.scpport} size="sm" style={{width:100}}
+                                        onChange={e => setMirror({...mirror, scpport: e.target.value.replace(/[^0-9]/g,'') })} />
+                                    <Form.Text className="text-muted">
+                                        {mirror.scpport.toString().length} / 5 * ex: 6060
+                                    </Form.Text>
                                 </Form.Group>
                             </>
                         )
@@ -389,7 +447,10 @@ const Net = (props) => {
                 </Modal.Footer>
             </Modal>
             
-            <ReactFlow id="flow" nodes={net.nodes} edges={net.edges} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} onConnect={onConnect}>
+            <Audit audit={audit} setAudit={setAudit} />
+            
+            <ReactFlow id="flow" nodes={net.nodes} edges={net.edges} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} 
+                onConnect={onConnect} onEdgeClick={onEdgeClick} fitView>
                 <Background />
                 <Controls />
             </ReactFlow>

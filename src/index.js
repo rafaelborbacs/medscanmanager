@@ -75,10 +75,7 @@ const Medscan = (props) => {
     return (
         <div id="base">
             <ModalMsg modal={modal} />
-            <Modal show={loading} dialogClassName="modal-loading">
-                <Modal.Header>
-                    <Modal.Title>Loading...</Modal.Title>
-                </Modal.Header>
+            <Modal show={loading} dialogClassName="modal-loading" centered>
                 <Modal.Body>
                     <Spinner animation="border" />
                 </Modal.Body>

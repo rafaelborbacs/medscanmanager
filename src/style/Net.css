@@ -12,3 +12,7 @@
     width:1200px;
     min-width: 1200px;
 }
+.red-text {
+    font-size: smaller;
+    color: red !important;
+}
