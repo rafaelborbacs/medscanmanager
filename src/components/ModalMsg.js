@@ -2,7 +2,7 @@ import React from 'react'
 import {Modal, Button} from 'react-bootstrap'
 
 const ModalMsg = (props) => (
-    <Modal show={props.modal.show} centered>
+    <Modal show={props.modal.show} dialogClassName="modal-msg" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }} centered>
         <Modal.Header>
             <Modal.Title>{props.modal.title}</Modal.Title>
         </Modal.Header>

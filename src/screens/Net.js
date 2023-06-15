@@ -6,11 +6,14 @@ import 'reactflow/dist/style.css'
 import '../style/Net.css'
 
 const randomPoint = () => Math.floor(20 + 300 * Math.random())
-
-const blankNode = { name: '', host: '', apiport: 8080, apiprotocol: 'http', mirrored: false }
+const formatDate = (d) => {
+    d = new Date(d)
+    return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getYear()-100} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`
+}
+const blankNode = { name: '', host: '', apiport: 8080, apiprotocol: 'http', scpport: 6000, mirrored: false }
 
 const Net = (props) => {
-    const {net, updateNet, exitNet, dcmFetch} = props
+    const {net, updateNet, exportNet, exitNet, dcmFetch, setModal, setAlert} = props
     const [newNet, setNewNet] = useState({...net})
     const [showNet, setShowNet] = useState(false)
     const [mirror, setMirror] = useState({...net.mirror})
@@ -27,6 +30,38 @@ const Net = (props) => {
         setNode({...blankNode})
     }
 
+    const insertNode = (n) => {
+        const url = `${n.apiprotocol}://${n.host}:${n.apiport}`
+        dcmFetch(`${url}/config`, {}, configs => {
+            if(!configs || !configs.name)
+                return setAlert(`Can't access ${url}`)
+            const name = configs.name
+            if(net.nodes.find(item => item.id === name))
+                return setAlert(`This node already exists`)
+            const newNode = {
+                ...configs,
+                ...n,
+                name,
+                id: name,
+                data: { label: name },
+                position: { x: randomPoint(), y: randomPoint() },
+                connectable: true
+            }
+            const nodes = [...net.nodes, newNode]
+            updateNet({ ...net, nodes })
+            for(const childNode of newNode.nodes){
+                if(childNode.httpmirror){
+                    childNode.mirrored = true
+                    childNode.host = net.mirror.host
+                    childNode.apiport = net.mirror.apiport
+                    childNode.apiprotocol = net.mirror.apiprotocol
+                }
+                insertNode(childNode)
+                onConnect({ source: name, target: childNode.name })
+            }
+        })
+    }
+
     const submitNode = () => {
         setShowNewNode(false)
         if(node.mirrored){
@@ -34,23 +69,7 @@ const Net = (props) => {
             node.apiport = net.mirror.apiport
             node.apiprotocol = net.mirror.apiprotocol
         }
-        const urlAPI = `${node.apiprotocol}://${node.host}:${node.apiport}`
-        if(net.nodes.find(n => n.id === urlAPI))
-            return alert('node exists')
-        dcmFetch(`${urlAPI}/config`, {}, (configs) => {
-            if(!configs || !configs.name)
-                return alert('ERROR')
-            const newNode = {
-                id: urlAPI,
-                data: { label: configs.name },
-                position: { x: randomPoint(), y: randomPoint() },
-                connectable: true,
-                ...node,
-                ...configs
-            }
-            const nodes = [...net.nodes, newNode]
-            updateNet({ ...net, nodes })
-        })
+        insertNode(node)
     }
 
     let x, y = 0
@@ -119,51 +138,72 @@ const Net = (props) => {
     }
 
     const changeName = () => {
-        const body = {
-            aetitle: net.aetitle,
-            name: node.name
-        }
+        const name = node.name
+        const body = { aetitle: net.aetitle, name }
         dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/config`, { method: 'PUT', body }, () => {
             const nodes = net.nodes.filter(n => n.id !== node.id)
-            nodes.push({ ...node, data: { label: node.name } })
-            updateNet({ ...net, nodes })
+            net.edges.forEach(e => {
+                if(e.source === node.id){
+                    e.source = name
+                    e.id = `${e.source} => ${e.target}`
+                }
+                if(e.target === node.id){
+                    e.target = name
+                    e.id = `${e.source} => ${e.target}`
+                }
+            })
+            nodes.push({ ...node, name, id: name, data: { label: name } })
+            updateNet({ ...net, nodes, edges: [...net.edges] })
         })
     }
 
     const onConnect = (params) => {
-        const edge = {
-            id: `${params.source} => ${params.target}`,
-            source: params.source,
-            target: params.target,
-            markerEnd: { type: MarkerType.ArrowClosed },
-            animated: true,
-            style: { stroke: 'blue' }
+        const source = net.nodes.find(n => n.id === params.source)
+        const target = net.nodes.find(n => n.id === params.target)
+        const body = {
+            host: target.host,
+            scpport: target.scpport,
+            apiport: target.apiport,
+            name: target.name,
+            apiprotocol: target.apiprotocol
         }
-        const edges = net.edges.filter(e => e.id !== edge.id)
-        edges.push({ ...edge })
-        updateNet({ ...net, edges })
+        dcmFetch(`${source.apiprotocol}://${source.host}:${source.apiport}/node`, { method: 'POST', body}, data => {
+            const edge = {
+                id: `${params.source} => ${params.target}`,
+                source: params.source,
+                target: params.target,
+                markerEnd: { type: MarkerType.ArrowClosed },
+                animated: true,
+                style: { stroke: 'blue' }
+            }
+            const edges = net.edges.filter(e => e.id !== edge.id)
+            edges.push({ ...edge })
+            updateNet({ ...net, edges })
+        })
     }
 
     const onEdgeClick = (event, edge) =>{
-        props.setModal({
+        setModal({
             show: true, 
             title: 'Remove connection?', 
             text: edge.id, 
             handleOk: () => {
+                const source = net.nodes.find(n => n.id === edge.source)
+                const body = { name: edge.target }
+                dcmFetch(`${source.apiprotocol}://${source.host}:${source.apiport}/node`, { method: 'DELETE', body })
                 const edges = net.edges.filter(e => e.id !== edge.id)
                 updateNet({ ...net, edges })
             },
-            handleCancel: () => props.setModal({show: false})
+            handleCancel: () => setModal({show: false})
         })
     }
 
     const auditNetwork = () => {
-        props.setModal({
+        setModal({
             show: true, 
-            title: 'Network Audit', 
+            title: 'Network Auditing', 
             text: 'Checks if any node has failed to synchronize DCM files', 
             handleOk: () => {
-                console.log('audit-------------------------')
                 const d = new Date()
                 const now = `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`
                 const items = []
@@ -187,9 +227,39 @@ const Net = (props) => {
                         }
                     })
                 })
-                props.setModal({show: false})
+                setModal({show: false})
             },
-            handleCancel: () => props.setModal({show: false})
+            handleCancel: () => setModal({show: false})
+        })
+    }
+
+    const testMirrorAPI = () => {
+        dcmFetch(`${mirror.apiprotocol}://${mirror.host}:${mirror.apiport}/status`, { headers: {name: 'mirror'} }, data => {
+            const text = data && data.msg === 'ok' ? 'Mirror API is up and running' : 'Mirror API is unreachable'
+            setModal({
+                show: true, 
+                title: 'Testing Mirror API...', 
+                text, 
+                handleOk: () => setModal({show: false})
+            })
+        })
+    }
+
+    const removeNode = () => {
+        setModal({
+            show: true, 
+            title: `Remove node ${node.name}?`,
+            text: 'Also removes all connections to it', 
+            handleOk: () => {
+                setShowNode(false)
+                const nodes = net.nodes.filter(n => n.id !== node.id)
+                const edges = net.edges.filter(e => e.source !== node.id && e.target !== node.id)
+                const body = { name: node.name }
+                for(const n of nodes)
+                    dcmFetch(`${n.apiprotocol}://${n.host}:${n.apiport}/node`, { method: 'DELETE', body })
+                updateNet({ ...net, nodes, edges })
+            },
+            handleCancel: () => setModal({show: false})
         })
     }
 
@@ -227,7 +297,8 @@ const Net = (props) => {
                         </Form.Text>
                     </Form.Group>
                     <Form.Group style={{marginTop: 10, marginBottom:10}}>
-                        <Form.Label>Security Key</Form.Label>
+                        <Form.Label>Security Key </Form.Label>
+                        <Form.Text className="text-muted"> * applies to all nodes</Form.Text>
                         <Form.Control maxLength={16} value={newNet.aetitle}
                             onChange={(e) => setNewNet({...newNet, aetitle: e.target.value.replace(/[^0-9a-zA-Z]/g,'') })} />
                         <Form.Text className="text-muted">
@@ -237,11 +308,10 @@ const Net = (props) => {
                 </Modal.Body>
                 <Modal.Footer style={{display: 'flex', padding:0}}>
                     <div style={{width:'40%', textAlign:'left', margin: 0, padding:10}}>
-                        <Button variant="success" size="sm" onClick={props.exportNet}>Export</Button>
+                        <Button variant="outline-success" size="sm" onClick={exportNet}>Export</Button>
                     </div>
                     <div style={{width:'60%', textAlign:'right', margin: 0, padding:10}}>
-                        <Form.Text className="text-muted">Applies security key to all nodes </Form.Text>
-                        <Button variant="success" size="sm" disabled={newNet.name.length === 0 || newNet.aetitle.length === 0} onClick={submitNet}>Ok</Button>
+                        <Button variant="success" size="sm" disabled={newNet.name.length === 0 || newNet.aetitle.length === 0} onClick={submitNet}>Change</Button>
                     </div>
                 </Modal.Footer>
             </Modal>
@@ -304,13 +374,21 @@ const Net = (props) => {
                                             defaultChecked={node.apiprotocol === 'https'} onChange={(e) => setNode({...node, apiprotocol: e.target.value })} />
                                     </div>
                                 </Form.Group>
+                                <Form.Group style={{marginTop: 10, marginBottom:10}}>
+                                    <Form.Label>SCP Port</Form.Label>
+                                    <Form.Control maxLength={5} value={node.scpport} size="sm" style={{width:100}}
+                                        onChange={(e) => setNode({...node, scpport: e.target.value.replace(/[^0-9]/g,'') })} />
+                                    <Form.Text className="text-muted">
+                                        {node.scpport.toString().length} / 5 * ex: 6000
+                                    </Form.Text>
+                                </Form.Group>
                             </>
                         )
                     }
                 </Modal.Body>
                 <Modal.Footer>
                     <Button variant="success" size="sm"
-                        disabled={(node.mirrored && node.name.length === 0) || (!node.mirrored && (node.host.length === 0 || node.apiport.toString().length < 2))} 
+                        disabled={(node.mirrored && node.name.length === 0) || (!node.mirrored && (node.host.length === 0 || node.apiport.toString().length < 2 || node.scpport.toString().length < 2))} 
                         onClick={submitNode}>Add</Button>
                 </Modal.Footer>
             </Modal>
@@ -325,7 +403,10 @@ const Net = (props) => {
                         <div style={{display: 'flex', alignItems: 'flex-start'}}>
                             <Form.Control maxLength={16} value={node.name} size="sm" style={{width:'70%'}}
                                 onChange={(e) => setNode({...node, name: e.target.value.replace(/[^0-9a-zA-Z]/g,'').toUpperCase() })} />
-                            <Button variant="success" onClick={changeName} size="sm" style={{textAlign:'right'}}>Change</Button>
+                            <Button variant="success" onClick={changeName} size="sm" style={{textAlign:'right'}}
+                                disabled={!node.name || net.nodes.find(n => n.name === node.name)}>
+                                Change
+                            </Button>
                         </div>
                         <Form.Text className="text-muted">
                                 {node.name.length} / 16
@@ -334,17 +415,13 @@ const Net = (props) => {
                     <Form.Group>
                         <Form.Label>Rest API</Form.Label>
                         <h5>
-                            <Badge bg="info">
-                                {node.apiprotocol + '://' + node.host + ':' + node.apiport}
-                            </Badge>
+                            <Badge bg="info">{node.apiprotocol + '://' + node.host + ':' + node.apiport}</Badge>
                         </h5>
                     </Form.Group>
                     <Form.Group>
                         <Form.Label>SCP</Form.Label>
                         <h5>
-                            <Badge bg="info">
-                                {net.aetitle + '@' + node.host + ':' + node.scpport}
-                            </Badge>
+                            <Badge bg="info">{net.aetitle + '@' + node.host + ':' + node.scpport}</Badge>
                         </h5>
                         <Button variant="secondary" onClick={stopSCP} disabled={!node.scp} size="sm">Stop</Button>{' '}
                         <Button variant="secondary" onClick={startSCP} disabled={node.scp} size="sm">Start</Button>{' '}
@@ -356,6 +433,9 @@ const Net = (props) => {
                         <Button variant="secondary" onClick={getFiles} size="sm">Files</Button>
                     </Form.Group>
                 </Modal.Body>
+                <Modal.Footer>
+                    <Button variant="danger" size="sm" onClick={removeNode}>Remove</Button>
+                </Modal.Footer>
             </Modal>
 
             <Modal show={showFiles} onHide={() => setShowFiles(false)} dialogClassName="modal-files">
@@ -383,7 +463,7 @@ const Net = (props) => {
                                     <td>{file.metadicom.patientid}</td>
                                     <td>{file.metadicom.modality}</td>
                                     <td>{file.metadicom.studydate}</td>
-                                    <td>{file.created}</td>
+                                    <td>{formatDate(file.created)}</td>
                                 </tr>
                             )
                         }
@@ -413,7 +493,7 @@ const Net = (props) => {
                                     </Form.Text>
                                 </Form.Group>
                                 <Form.Group style={{marginTop: 10, marginBottom:10, display: 'flex', alignItems: 'flex-start'}}>
-                                    <div style={{width: 200}}>
+                                    <div>
                                         <Form.Label>Mirror API Port</Form.Label>
                                         <Form.Control maxLength={5} value={mirror.apiport} size="sm" style={{width:100}}
                                             onChange={e => setMirror({...mirror, apiport: e.target.value.replace(/[^0-9]/g,'') })} />
@@ -421,29 +501,32 @@ const Net = (props) => {
                                             {mirror.apiport.toString().length} / 5 * ex: 8383
                                         </Form.Text>
                                     </div>
-                                    <div>
-                                        <br/>
+                                    <div style={{margin: 'auto'}}>
                                         <Form.Check style={{display:'inline-block', paddingRight:20}} label='http' name='apiprotocol' value='http' type='radio' 
                                             defaultChecked={mirror.apiprotocol === 'http'} onChange={(e) => setMirror({...mirror, apiprotocol: e.target.value })} />
                                         <Form.Check style={{display:'inline-block', paddingRight:20}} label='https' name='apiprotocol' value='https' type='radio' 
                                             defaultChecked={mirror.apiprotocol === 'https'} onChange={(e) => setMirror({...mirror, apiprotocol: e.target.value })} />
                                     </div>
+                                    <Button variant="secondary" onClick={testMirrorAPI} size="sm" style={{margin: 'auto'}} disabled={mirror.apiport.toString().length < 2}>Test API</Button>
                                 </Form.Group>
-                                <Form.Group style={{marginTop: 10, marginBottom:10}}>
-                                    <Form.Label>Mirror SCP Port</Form.Label>
-                                    <Form.Control maxLength={5} value={mirror.scpport} size="sm" style={{width:100}}
-                                        onChange={e => setMirror({...mirror, scpport: e.target.value.replace(/[^0-9]/g,'') })} />
-                                    <Form.Text className="text-muted">
-                                        {mirror.scpport.toString().length} / 5 * ex: 6060
-                                    </Form.Text>
+                                <Form.Group style={{marginTop: 10, marginBottom:10, display: 'flex', alignItems: 'flex-start'}}>
+                                    <div>
+                                        <Form.Label>Mirror SCP Port</Form.Label>
+                                        <Form.Control maxLength={5} value={mirror.scpport} size="sm" style={{width:100}}
+                                            onChange={e => setMirror({...mirror, scpport: e.target.value.replace(/[^0-9]/g,'') })} />
+                                        <Form.Text className="text-muted">
+                                            {mirror.scpport.toString().length} / 5 * ex: 6060
+                                        </Form.Text>
+                                    </div>
+                                    <Badge style={{margin:'auto'}} bg="info">{mirror.host + ':' + mirror.scpport}</Badge>
                                 </Form.Group>
                             </>
                         )
                     }
                 </Modal.Body>
                 <Modal.Footer>
-                    <Button variant="success" size="sm" disabled={mirror.host.length === 0 || mirror.apiport.toString().length < 2} 
-                        onClick={submitMirror}>Save</Button>
+                    <Button variant="success" size="sm" disabled={mirror.host.length === 0 || mirror.apiport.toString().length < 2 || mirror.scpport.toString().length < 2} 
+                        onClick={submitMirror}>Change</Button>
                 </Modal.Footer>
             </Modal>
             
