@@ -1,5 +1,5 @@
 import ls from 'local-storage'
-import {useState} from 'react'
+import {useState, useEffect} from 'react'
 import ReactDOM from 'react-dom/client'
 import {Modal, Spinner, Container, Alert} from 'react-bootstrap'
 import Net from './screens/Net'
@@ -16,7 +16,10 @@ const Medscan = (props) => {
 
     const setLoading = (boo) => setLoadings(Math.max(loading + (boo ? 1 : -1), 0))
 
+    useEffect(() => { setTimeout(() => setAlert(false), 3000) }, [alert])
+
     const dcmFetch = (url, options, callback) => {
+        console.log('url',url,'options',options)
         setLoading(true)
         options.headers = {...options.headers, 'content-type': 'application/json', 'authorization': `Bearer ${net.aetitle}`}
         if(options.body && typeof options.body === 'object')
@@ -48,10 +51,6 @@ const Medscan = (props) => {
         setScreen('Net')
     }
     
-    const openNet = () => {
-
-    }
-    
     const exitNet = () => {
         setModal(false)
         ls.clear()
@@ -70,14 +69,14 @@ const Medscan = (props) => {
     }
 
     const screens = {
-        Welcome: <Welcome net={net} updateNet={updateNet} openNet={openNet} setModal={setModal} />,
+        Welcome: <Welcome net={net} updateNet={updateNet} setModal={setModal} />,
         Net: <Net net={net} updateNet={updateNet} exitNet={exitNet} exportNet={exportNet} dcmFetch={dcmFetch} setModal={setModal} setAlert={setAlert} />
     }
     
     return (
         <div id="base">
             <ModalMsg modal={modal} />
-            <Modal show={loading > 0} dialogClassName="modal-loading" centered>
+            <Modal show={loading > 0} dialogClassName="modal-loading" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }} centered>
                 <Modal.Body>
                     <Spinner animation="border" />
                 </Modal.Body>
@@ -85,7 +84,7 @@ const Medscan = (props) => {
             {
                 alert && 
                     (
-                        <Alert variant="danger" onClose={() => setAlert(false)} dismissible>
+                        <Alert variant="danger" onClose={() => setAlert(false)} style={{textAlign:'center', padding:5}} dismissible>
                             <Alert.Heading>{alert}</Alert.Heading>
                         </Alert>
                     )

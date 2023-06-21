@@ -1,17 +1,26 @@
-import React, {useState} from 'react'
+import React, {useState, useEffect} from 'react'
 import {ButtonGroup, Button, Dropdown, Form, Modal, Badge, Table} from 'react-bootstrap'
 import ReactFlow, {Background, Controls, MarkerType} from 'reactflow'
 import Audit from '../components/Audit'
 import 'reactflow/dist/style.css'
 import '../style/Net.css'
 
+const randomAETitle = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+    let aetitle = ''
+    for (let i = 0; i < 16; i++) {
+        const randomIndex = Math.floor(Math.random() * chars.length)
+        aetitle += chars.charAt(randomIndex)
+    }
+    return aetitle
+}
 const randomPoint = () => Math.floor(20 + 300 * Math.random())
 const formatDate = (d) => {
     d = new Date(d)
     return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getYear()-100} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`
 }
 const blankNode = { name: '', host: '', apiport: 8080, apiprotocol: 'http', scpport: 6000, mirrored: false }
-
+let edges = []
 const Net = (props) => {
     const {net, updateNet, exportNet, exitNet, dcmFetch, setModal, setAlert} = props
     const [newNet, setNewNet] = useState({...net})
@@ -21,55 +30,41 @@ const Net = (props) => {
     const [node, setNode] = useState({...blankNode})
     const [showNode, setShowNode] = useState(false)
     const [showNewNode, setShowNewNode] = useState(false)
-    const [files, setFiles] = useState([])
-    const [showFiles, setShowFiles] = useState(false)
+    const [files, setFiles] = useState(false)
+    const [scpFiles, setSCPFiles] = useState(false)
     const [audit, setAudit] = useState({ show: false })
+
+    useEffect(() => {
+        const fit = document.querySelector('button[title="fit view"]')
+        if(fit) setTimeout(() => { fit.click() }, 1000)
+    }, [net])
     
     const newNode = () => {
         setShowNewNode(true)
         setNode({...blankNode})
     }
-
-    const insertNode = (n) => {
-        const url = `${n.apiprotocol}://${n.host}:${n.apiport}`
+    
+    const submitNode = () => {
+        setShowNewNode(false)
+        const url = `${node.apiprotocol}://${node.host}:${node.apiport}`
+        dcmFetch(`${url}/node`, { method: 'DELETE', body: {} })
+        if(net.nodes.find(n => n.host === node.host && n.apiport === node.apiport))
+            return setAlert(`Node running on ${url} already exists`)
         dcmFetch(`${url}/config`, {}, configs => {
             if(!configs || !configs.name)
                 return setAlert(`Can't access ${url}`)
             const name = configs.name
-            if(net.nodes.find(item => item.id === name))
-                return setAlert(`This node already exists`)
-            const newNode = {
-                ...configs,
-                ...n,
-                name,
-                id: name,
-                data: { label: name },
-                position: { x: randomPoint(), y: randomPoint() },
-                connectable: true
-            }
-            const nodes = [...net.nodes, newNode]
-            updateNet({ ...net, nodes })
-            for(const childNode of newNode.nodes){
-                if(childNode.httpmirror){
-                    childNode.mirrored = true
-                    childNode.host = net.mirror.host
-                    childNode.apiport = net.mirror.apiport
-                    childNode.apiprotocol = net.mirror.apiprotocol
-                }
-                insertNode(childNode)
-                onConnect({ source: name, target: childNode.name })
-            }
+            if(net.nodes.find(n => n.name === name))
+                return setAlert(`Node ${name} already exists`)
+            Object.keys(configs).forEach(key => node[key] = node[key] ? node[key] : configs[key])
+            node.name = name
+            node.id = name
+            node.data = { label: name }
+            node.position = { x: randomPoint(), y: randomPoint() }
+            node.connectable = true
+            node.nodes = []
+            updateNet({ ...net, nodes: [...net.nodes, node] })
         })
-    }
-
-    const submitNode = () => {
-        setShowNewNode(false)
-        if(node.mirrored){
-            node.host = net.mirror.host
-            node.apiport = net.mirror.apiport
-            node.apiprotocol = net.mirror.apiprotocol
-        }
-        insertNode(node)
     }
 
     let x, y = 0
@@ -84,33 +79,77 @@ const Net = (props) => {
         const dY = Math.floor((event.y - y) / 10)
         if(dX === 0 && dY === 0)
             return openNode(node)
+        const myNode = net.nodes.find(n => n.id === node.id)
         const nodes = net.nodes.filter(n => n.id !== node.id)
-        nodes.push({ ...node, position: { x: node.position.x + dX, y: node.position.y + dY } })
+        nodes.push({ ...myNode, position: { x: node.position.x + dX, y: node.position.y + dY } })
         updateNet({ ...net, nodes })
     }
 
     const openNode = (node) => {
-        setNode({...node})
+        setNode(net.nodes.find(n => n.id === node.id))
         setShowNode(true)
     }
 
-    const updateFilesCount = () => {
-        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file?count=1`, {}, count => setNode({...node, filesCount: count ? count : 0}))
+    const filesCountSCP = () => {
+        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/scpfiles`, {}, files => {
+            node.filesCountSCP = files.length
+            updateNet({ ...net })
+        })
+    }
+
+    const filesCountMetadata = () => {
+        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file?count=1`, {}, count => {
+            node.filesCountMetadata = count ? count : 0
+            updateNet({ ...net })
+        })
     }
 
     const startSCP = () => {
-        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/startscp`, {method: 'POST'}, () => setNode({...node, scp: true}))
+        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/startscp`, {method: 'POST'}, () => {
+            node.scp = true
+            updateNet({ ...net })
+        })
     }
 
     const stopSCP = () => {
-        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/startscp`, {method: 'POST'}, () => setNode({...node, scp: false}))
+        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/startscp`, {method: 'POST'}, () => {
+            node.scp = false
+            updateNet({ ...net })
+        })
     }
 
-    const getFiles = () => {
-        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file`, {}, files => {
-            setFiles(files)
-            setShowFiles(true)
+    const cleanSCP = () => {
+        setModal({
+            show: true,
+            title: 'Clean this SCP?',
+            text: 'Removes all DCM files but keeps the metadata',
+            handleOk: () => dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/cleanscp`, {method: 'DELETE'}, () => {
+                node.filesCountSCP = undefined
+                setModal({show: false})
+            }),
+            handleCancel: () => setModal({show: false})
         })
+    }
+
+    const cleanSCPMetadata = () => {
+        setModal({
+            show: true,
+            title: 'Clean DCM metadata?',
+            text: 'If DCM files are still present in the SCP, metadata will be recollected',
+            handleOk: () => dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file`, {method: 'DELETE', body: {names:[]}}, () => {
+                node.filesCountMetadata = undefined
+                setModal({show: false})
+            }),
+            handleCancel: () => setModal({show:false})
+        })
+    }
+
+    const getSCPFiles = () => {
+        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/scpfiles`, {}, files => setSCPFiles(files))
+    }
+    
+    const getMetadataFiles = () => {
+        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file`, {}, files => setFiles(files))
     }
 
     const openNet = () => {
@@ -138,22 +177,19 @@ const Net = (props) => {
     }
 
     const changeName = () => {
+        if(edges.find(e => e.source === node.id || e.target === node.id))
+            return setModal({
+                show: true,
+                title: 'This node is connected',
+                text: 'Remove all connections before changing the name',
+                handleOk: () => setModal({show: false})
+            })
         const name = node.name
         const body = { aetitle: net.aetitle, name }
         dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/config`, { method: 'PUT', body }, () => {
             const nodes = net.nodes.filter(n => n.id !== node.id)
-            net.edges.forEach(e => {
-                if(e.source === node.id){
-                    e.source = name
-                    e.id = `${e.source} => ${e.target}`
-                }
-                if(e.target === node.id){
-                    e.target = name
-                    e.id = `${e.source} => ${e.target}`
-                }
-            })
             nodes.push({ ...node, name, id: name, data: { label: name } })
-            updateNet({ ...net, nodes, edges: [...net.edges] })
+            updateNet({ ...net, nodes })
         })
     }
 
@@ -168,21 +204,16 @@ const Net = (props) => {
             apiprotocol: target.apiprotocol
         }
         dcmFetch(`${source.apiprotocol}://${source.host}:${source.apiport}/node`, { method: 'POST', body}, data => {
-            const edge = {
-                id: `${params.source} => ${params.target}`,
-                source: params.source,
-                target: params.target,
-                markerEnd: { type: MarkerType.ArrowClosed },
-                animated: true,
-                style: { stroke: 'blue' }
+            if(data.msg === 'ok'){
+                source.nodes = source.nodes.filter(n => n.id !== target.id)
+                source.nodes.push({ id: target.id })
+                updateNet({ ...net })
             }
-            const edges = net.edges.filter(e => e.id !== edge.id)
-            edges.push({ ...edge })
-            updateNet({ ...net, edges })
+            else setAlert(data.msg)
         })
     }
 
-    const onEdgeClick = (event, edge) =>{
+    const onEdgeClick = (event, edge) => {
         setModal({
             show: true, 
             title: 'Remove connection?', 
@@ -190,9 +221,10 @@ const Net = (props) => {
             handleOk: () => {
                 const source = net.nodes.find(n => n.id === edge.source)
                 const body = { name: edge.target }
-                dcmFetch(`${source.apiprotocol}://${source.host}:${source.apiport}/node`, { method: 'DELETE', body })
-                const edges = net.edges.filter(e => e.id !== edge.id)
-                updateNet({ ...net, edges })
+                dcmFetch(`${source.apiprotocol}://${source.host}:${source.apiport}/node`, { method: 'DELETE', body }, () => {
+                    source.nodes = source.nodes.filter(n => n.id !== edge.target)
+                    updateNet({ ...net })
+                })
             },
             handleCancel: () => setModal({show: false})
         })
@@ -207,8 +239,8 @@ const Net = (props) => {
                 const d = new Date()
                 const now = `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`
                 const items = []
-                const headers = { name: '-' }
-                net.nodes.forEach(node => headers[node.name] = '-')
+                const headers = []
+                net.nodes.forEach(node => headers.push(node.name))
                 net.nodes.forEach(node => {
                     dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file`, {}, files => {
                         if(files){
@@ -218,7 +250,8 @@ const Net = (props) => {
                                 if(found)
                                     found[node.name] = created
                                 else {
-                                    const auditItem = { ...headers, name: file.name }
+                                    const auditItem = { name: file.name }
+                                    headers.forEach(header => auditItem[header] = '-')
                                     auditItem[node.name] = created
                                     items.push(auditItem)
                                 }
@@ -249,18 +282,37 @@ const Net = (props) => {
         setModal({
             show: true, 
             title: `Remove node ${node.name}?`,
-            text: 'Also removes all connections to it', 
+            text: 'Also removes its connections', 
             handleOk: () => {
                 setShowNode(false)
+                dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/node`, { method: 'DELETE', body:{} })
                 const nodes = net.nodes.filter(n => n.id !== node.id)
-                const edges = net.edges.filter(e => e.source !== node.id && e.target !== node.id)
-                const body = { name: node.name }
-                for(const n of nodes)
-                    dcmFetch(`${n.apiprotocol}://${n.host}:${n.apiport}/node`, { method: 'DELETE', body })
-                updateNet({ ...net, nodes, edges })
+                for(const n of nodes){
+                    dcmFetch(`${n.apiprotocol}://${n.host}:${n.apiport}/node`, { method: 'DELETE', body: { name: node.name } })
+                    n.nodes = n.nodes.filter(n => n.id !== node.id)
+                }
+                updateNet({ ...net, nodes })
             },
             handleCancel: () => setModal({show: false})
         })
+    }
+
+    const formEdges = () => {
+        edges = []
+        net.nodes.forEach(source => {
+            if(source.nodes)
+                source.nodes.forEach(target => {
+                    edges.push({
+                        id: `${source.id} => ${target.id}`,
+                        source: source.id,
+                        target: target.id,
+                        markerEnd: { type: MarkerType.ArrowClosed },
+                        animated: true,
+                        style: { stroke: 'blue' }
+                    })
+                })
+        })
+        return edges
     }
 
     return (
@@ -297,10 +349,13 @@ const Net = (props) => {
                         </Form.Text>
                     </Form.Group>
                     <Form.Group style={{marginTop: 10, marginBottom:10}}>
-                        <Form.Label>Security Key </Form.Label>
-                        <Form.Text className="text-muted"> * applies to all nodes</Form.Text>
-                        <Form.Control maxLength={16} value={newNet.aetitle}
+                        <Form.Label>Security Key</Form.Label>
+                        <div style={{display: 'flex', alignItems: 'flex-start'}}>
+                            <Form.Control maxLength={16} value={newNet.aetitle} size="sm" style={{width:300}}
                             onChange={(e) => setNewNet({...newNet, aetitle: e.target.value.replace(/[^0-9a-zA-Z]/g,'') })} />
+                            <Button variant="success" onClick={() => setNewNet({...newNet, aetitle: randomAETitle()})} 
+                                size="sm" style={{textAlign:'right'}}>Random</Button>
+                        </div>
                         <Form.Text className="text-muted">
                             {net.aetitle.length} / 16 * letters and numbers
                         </Form.Text>
@@ -393,7 +448,7 @@ const Net = (props) => {
                 </Modal.Footer>
             </Modal>
 
-            <Modal show={showNode} onHide={() => setShowNode(false)} dialogClassName="modal-node">
+            <Modal show={showNode} onHide={() => setShowNode(false)}>
                 <Modal.Header closeButton>
                     <Modal.Title>{node.name}</Modal.Title>
                 </Modal.Header>
@@ -401,7 +456,7 @@ const Net = (props) => {
                     <Form.Group style={{marginTop: 10, marginBottom:10}}>
                         <Form.Label>Name</Form.Label>
                         <div style={{display: 'flex', alignItems: 'flex-start'}}>
-                            <Form.Control maxLength={16} value={node.name} size="sm" style={{width:'70%'}}
+                            <Form.Control maxLength={16} value={node.name} size="sm" style={{width:300}}
                                 onChange={(e) => setNode({...node, name: e.target.value.replace(/[^0-9a-zA-Z]/g,'').toUpperCase() })} />
                             <Button variant="success" onClick={changeName} size="sm" style={{textAlign:'right'}}
                                 disabled={!node.name || net.nodes.find(n => n.name === node.name)}>
@@ -409,8 +464,8 @@ const Net = (props) => {
                             </Button>
                         </div>
                         <Form.Text className="text-muted">
-                                {node.name.length} / 16
-                            </Form.Text>
+                            {node.name.length} / 16
+                        </Form.Text>
                     </Form.Group>
                     <Form.Group>
                         <Form.Label>Rest API</Form.Label>
@@ -425,12 +480,18 @@ const Net = (props) => {
                         </h5>
                         <Button variant="secondary" onClick={stopSCP} disabled={!node.scp} size="sm">Stop</Button>{' '}
                         <Button variant="secondary" onClick={startSCP} disabled={node.scp} size="sm">Start</Button>{' '}
-                        <Form.Text style={{marginRight:20}}>
-                            {node.scp ? 'running' : 'stoped'}
-                        </Form.Text>{' '}
-                        <Button variant="secondary" onClick={updateFilesCount} style={{marginRight:10}} size="sm">Files count</Button>{' '}
-                        <Form.Label style={{marginRight:20}}>{node.filesCount === undefined ? '-' : node.filesCount}</Form.Label>
-                        <Button variant="secondary" onClick={getFiles} size="sm">Files</Button>
+                        <Form.Text style={{marginRight:20}}>{node.scp ? 'running' : 'stoped'}</Form.Text>{' '}
+                        <Button variant="secondary" onClick={filesCountSCP} style={{marginRight:10}} size="sm">Count files</Button>{' '}
+                        <Form.Label style={{marginRight:20}}>{node.filesCountSCP === undefined ? '-' : node.filesCountSCP}</Form.Label>
+                        <Button variant="secondary" onClick={getSCPFiles} size="sm">Files</Button>{' '}
+                        <Button variant="secondary" onClick={cleanSCP} size="sm">Clean SCP</Button>
+                    </Form.Group>
+                    <Form.Group>
+                        <Form.Label style={{marginBottom:10, marginTop:10}}>DCM metadata</Form.Label><br/>
+                        <Button variant="secondary" onClick={filesCountMetadata} style={{marginRight:10}} size="sm">Count files</Button>{' '}
+                        <Form.Label style={{marginRight:20}}>{node.filesCountMetadata === undefined ? '-' : node.filesCountMetadata}</Form.Label>
+                        <Button variant="secondary" onClick={getMetadataFiles} size="sm">Files</Button>{' '}
+                        <Button variant="secondary" onClick={cleanSCPMetadata} size="sm">Clean metadata</Button>
                     </Form.Group>
                 </Modal.Body>
                 <Modal.Footer>
@@ -438,9 +499,9 @@ const Net = (props) => {
                 </Modal.Footer>
             </Modal>
 
-            <Modal show={showFiles} onHide={() => setShowFiles(false)} dialogClassName="modal-files">
+            <Modal show={files} onHide={() => setFiles(false)} dialogClassName="modal-files">
                 <Modal.Header closeButton>
-                    <Modal.Title>{node.name + ' (' + files.length + ' files)'}</Modal.Title>
+                    <Modal.Title>{node.name + ' (' + (files ? files.length : 0) + ' files)'}</Modal.Title>
                 </Modal.Header>
                 <Modal.Body style={{maxHeight: 500, overflow: 'auto'}}>
                     <Table size="sm" responsive={true} striped bordered hover style={{fontSize: 'smaller'}}>
@@ -472,6 +533,17 @@ const Net = (props) => {
                 </Modal.Body>
             </Modal>
             
+            <Modal show={scpFiles} onHide={() => setSCPFiles(false)} dialogClassName="modal-scp-files">
+                <Modal.Header closeButton>
+                    <Modal.Title>{node.name + ' (' + (scpFiles ? scpFiles.length : 0) + ' files)'}</Modal.Title>
+                </Modal.Header>
+                <Modal.Body style={{maxHeight: 500, overflow: 'auto'}}>
+                    {
+                        scpFiles && scpFiles.map(file => <Badge bg="light" text="dark" key={file}>{file}</Badge>)
+                    }
+                </Modal.Body>
+            </Modal>
+
             <Modal show={showMirror} onHide={() => setShowMirror(false)}>
                 <Modal.Header closeButton>
                     <Modal.Title>Mirror</Modal.Title>
@@ -532,7 +604,7 @@ const Net = (props) => {
             
             <Audit audit={audit} setAudit={setAudit} />
             
-            <ReactFlow id="flow" nodes={net.nodes} edges={net.edges} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} 
+            <ReactFlow id="flow" nodes={net.nodes} edges={formEdges()} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} 
                 onConnect={onConnect} onEdgeClick={onEdgeClick} fitView>
                 <Background />
                 <Controls />

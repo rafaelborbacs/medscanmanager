@@ -3,40 +3,63 @@ import {Modal, Table} from 'react-bootstrap'
 
 const formatDate = (d) => {
     d = new Date(d)
-    return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getYear()-100} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`
+    const D = d.getUTCDate().toString().padStart(2, '0')
+    const M = (d.getUTCMonth() + 1).toString().padStart(2, '0')
+    const Y = d.getUTCFullYear().toString().slice(-2)
+    const h = d.getUTCHours().toString().padStart(2, '0')
+    const m = d.getUTCMinutes().toString().padStart(2, '0')
+    const s = d.getUTCSeconds().toString().padStart(2, '0')
+    return `${D}/${M}/${Y} ${h}:${m}:${s}`
 }
 
 const formatTime = (d) => {
     d = new Date(d)
-    return `${d.getHours().toString()}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`
+    const h = d.getUTCHours().toString().padStart(2, '0')
+    const m = d.getUTCMinutes().toString().padStart(2, '0')
+    const s = d.getUTCSeconds().toString().padStart(2, '0')
+    return (h === '00' ? '' : h + 'h ') + (m === '00' ? '' : m + 'm ') + s + 's'
 }
 
 const Audit = (props) => {
     const { audit, setAudit } = props
-    const { show, name, now, headers, items} = audit
-    
-    if(headers && headers.length > 0 && items && items.length > 0){
-        headers['Max. Delay'] = Infinity
-        headers['Avg. Delay'] = Infinity
+    let { show, name, now, headers, items} = audit
+
+    let totalAvg = 0
+    let totalMax = 0
+    if(headers && items && items.length > 0){
+        headers = [...headers]
+        items = JSON.parse(JSON.stringify(items))
         for(const item of items){
-            let max, sum, n = 0
-            let min = Infinity
-            Object.keys(headers).forEach(key => {
-                if(key !== 'name'){
-                    let d = item[key]
-                    if(d === '-')
-                        d = Infinity
-                    else
-                        item[key] = formatDate(d)
-                    n++
-                    sum += d
-                    max = d > max ? d : max
-                    min = d < min ? d : min
+            let max = 0, sum = 0, n = 0
+            let min = 9999999999999
+            for(const key of headers){
+                let d = item[key]
+                if(d === '-'){
+                    n = null
+                    break
                 }
-            })
-            item['Max. Delay'] = max === Infinity ? '-' : formatTime(max - min)
-            item['Avg. Delay'] = sum === Infinity ? '-' : formatDate(Math.floor(sum / n) - min)
+                n++
+                sum += d
+                max = d > max ? d : max
+                min = d < min ? d : min
+                //console.log('item',item,'key',key,'item[key]',item[key])
+                item[key] = formatDate(item[key])
+            }
+            if(n == null){
+                item['Max. Delay'] = '-'
+                item['Avg. Delay'] = '-'
+            }
+            else {
+                const maxDelay = max - min
+                const avgDelay = 2 * (Math.floor(sum / n) - min)
+                if(maxDelay > totalMax)
+                    totalMax = maxDelay
+                totalAvg += avgDelay / items.length
+                item['Max. Delay'] = formatTime(maxDelay)
+                item['Avg. Delay'] = formatTime(avgDelay)
+            }
         }
+        headers.push('Max. Delay', 'Avg. Delay')
     }
 
     let i = 0
@@ -46,20 +69,28 @@ const Audit = (props) => {
                 <Modal.Title>Auditing {name} at {now}</Modal.Title>
             </Modal.Header>
             <Modal.Body style={{maxHeight: 500, overflow: 'auto'}}>
+                <div style={{display: 'flex', justifyContent: 'flex-end'}}>
+                    <span style={{margin:10}}>Total Max. Delay:</span>
+                    <strong style={{margin:10}}>{formatTime(totalMax)}</strong>
+                    <span style={{margin:10}}>Total Avg. Delay:</span>
+                    <strong style={{margin:10}}>{formatTime(totalAvg)}</strong>
+                </div>
                 <Table size="sm" style={{fontSize: 'smaller'}} responsive={true} striped bordered hover>
                     <thead>
                         <tr>
+                            <th key="thName">Name</th>
                             {
-                                headers && Object.keys(headers).map(key => <th key={key}>{key}</th>)
+                                headers && headers.map(key => <th key={key}>{key}</th>)
                             }
                         </tr>
                     </thead>
                     <tbody>
                     {
                         items && items.map(item => 
-                            <tr key={++i}>
+                            <tr key={item.name+'tr'}>
+                                <td key={item.name+'td'}>{item.name}</td>
                                 {
-                                    headers && Object.keys(headers).map(key => <td key={i++}>{item[key]}</td>)
+                                    headers && headers.map(key => <td key={i++}>{item[key]}</td>)
                                 }
                             </tr>
                         )
