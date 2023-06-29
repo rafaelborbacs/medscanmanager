@@ -316,7 +316,7 @@ const Net = (props) => {
     }
 
     const reliabilityTests = () => {
-        setTests({...tests, show: true })
+        setTests({...tests, net, show: true })
     }
 
     const formEdges = () => {

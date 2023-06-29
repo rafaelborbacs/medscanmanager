@@ -151,7 +151,6 @@ const Tests = (props) => {
                         )
                     }
                     </div>
-                    <Form.Text className="text-muted">Remove all connections from/to source and target nodes</Form.Text>
                 </Form.Group>
                 <Form.Group style={{marginTop: 10, marginBottom:10}}>
                     <Form.Label>Repetitions</Form.Label>
