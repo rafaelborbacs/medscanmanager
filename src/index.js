@@ -19,9 +19,9 @@ const Medscan = (props) => {
     useEffect(() => { setTimeout(() => setAlert(false), 3000) }, [alert])
 
     const dcmFetch = (url, options, callback) => {
-        console.log('url',url,'options',options)
+        console.log('url', url, 'options', options)
         setLoading(true)
-        options.headers = {...options.headers, 'content-type': 'application/json', 'authorization': `Bearer ${net.aetitle}`}
+        options.headers = {...options.headers, name: options.name, 'content-type': 'application/json', 'authorization': `Bearer ${net.aetitle}`}
         if(options.body && typeof options.body === 'object')
             options.body = JSON.stringify(options.body)
         fetch(url, options)

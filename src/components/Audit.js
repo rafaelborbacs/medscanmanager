@@ -12,12 +12,13 @@ const formatDate = (d) => {
     return `${D}/${M}/${Y} ${h}:${m}:${s}`
 }
 
-const formatTime = (d) => {
-    d = new Date(d)
-    const h = d.getUTCHours().toString().padStart(2, '0')
-    const m = d.getUTCMinutes().toString().padStart(2, '0')
-    const s = d.getUTCSeconds().toString().padStart(2, '0')
-    return (h === '00' ? '' : h + 'h ') + (m === '00' ? '' : m + 'm ') + s + 's'
+const formatTime = (time) => {
+    const hours = Math.floor(time / (60 * 60 * 1000))
+    const minutes = Math.floor((time % (60 * 60 * 1000)) / (60 * 1000))
+    const seconds = (time % (60 * 1000)) / 1000
+    return (hours === 0 ? '' : `${hours}h`)
+        + (minutes === 0 ? '' : `${minutes.toString().padStart(2, '0')}m`)
+        + `${seconds.toFixed(2)}s`
 }
 
 const Audit = (props) => {
@@ -30,7 +31,7 @@ const Audit = (props) => {
         headers = [...headers]
         items = JSON.parse(JSON.stringify(items))
         for(const item of items){
-            let max = 0, sum = 0, n = 0
+            let max = 0, n = 0
             let min = 9999999999999
             for(const key of headers){
                 let d = item[key]
@@ -39,7 +40,6 @@ const Audit = (props) => {
                     break
                 }
                 n++
-                sum += d
                 max = d > max ? d : max
                 min = d < min ? d : min
                 //console.log('item',item,'key',key,'item[key]',item[key])
@@ -47,19 +47,16 @@ const Audit = (props) => {
             }
             if(n == null){
                 item['Max. Delay'] = '-'
-                item['Avg. Delay'] = '-'
             }
             else {
                 const maxDelay = max - min
-                const avgDelay = 2 * (Math.floor(sum / n) - min)
                 if(maxDelay > totalMax)
                     totalMax = maxDelay
-                totalAvg += avgDelay / items.length
+                totalAvg += maxDelay / items.length
                 item['Max. Delay'] = formatTime(maxDelay)
-                item['Avg. Delay'] = formatTime(avgDelay)
             }
         }
-        headers.push('Max. Delay', 'Avg. Delay')
+        headers.push('Max. Delay')
     }
 
     let i = 0

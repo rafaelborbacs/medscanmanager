@@ -2,6 +2,7 @@ import React, {useState, useEffect} from 'react'
 import {ButtonGroup, Button, Dropdown, Form, Modal, Badge, Table} from 'react-bootstrap'
 import ReactFlow, {Background, Controls, MarkerType} from 'reactflow'
 import Audit from '../components/Audit'
+import Tests from '../components/Tests'
 import 'reactflow/dist/style.css'
 import '../style/Net.css'
 
@@ -33,6 +34,7 @@ const Net = (props) => {
     const [files, setFiles] = useState(false)
     const [scpFiles, setSCPFiles] = useState(false)
     const [audit, setAudit] = useState({ show: false })
+    const [tests, setTests] = useState({ show: false, net })
 
     useEffect(() => {
         const fit = document.querySelector('button[title="fit view"]')
@@ -46,16 +48,22 @@ const Net = (props) => {
     
     const submitNode = () => {
         setShowNewNode(false)
+        if(node.mirrored){
+            node.apiprotocol = mirror.apiprotocol
+            node.host = mirror.host
+            node.apiport = mirror.apiport
+            node.scpport = mirror.scpport
+        }
+        else if(net.nodes.find(n => n.host === node.host && n.apiport === node.apiport))
+            return setAlert(`Node running on ${node.host}:${node.apiport} already exists`)
         const url = `${node.apiprotocol}://${node.host}:${node.apiport}`
-        dcmFetch(`${url}/node`, { method: 'DELETE', body: {} })
-        if(net.nodes.find(n => n.host === node.host && n.apiport === node.apiport))
-            return setAlert(`Node running on ${url} already exists`)
-        dcmFetch(`${url}/config`, {}, configs => {
+        dcmFetch(`${url}/config`, {name: node.name}, configs => {
             if(!configs || !configs.name)
                 return setAlert(`Can't access ${url}`)
             const name = configs.name
             if(net.nodes.find(n => n.name === name))
                 return setAlert(`Node ${name} already exists`)
+            dcmFetch(`${url}/node`, {method: 'DELETE', name, body: {}})
             Object.keys(configs).forEach(key => node[key] = node[key] ? node[key] : configs[key])
             node.name = name
             node.id = name
@@ -91,28 +99,28 @@ const Net = (props) => {
     }
 
     const filesCountSCP = () => {
-        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/scpfiles`, {}, files => {
-            node.filesCountSCP = files.length
+        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/scpfilescount`, {name: node.name}, count => {
+            node.filesCountSCP = count ? count : 0
             updateNet({ ...net })
         })
     }
 
     const filesCountMetadata = () => {
-        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file?count=1`, {}, count => {
+        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/filecount`, {name: node.name}, count => {
             node.filesCountMetadata = count ? count : 0
             updateNet({ ...net })
         })
     }
 
     const startSCP = () => {
-        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/startscp`, {method: 'POST'}, () => {
+        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/startscp`, {method: 'POST', name: node.name}, () => {
             node.scp = true
             updateNet({ ...net })
         })
     }
 
     const stopSCP = () => {
-        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/startscp`, {method: 'POST'}, () => {
+        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/startscp`, {method: 'POST', name: node.name}, () => {
             node.scp = false
             updateNet({ ...net })
         })
@@ -123,7 +131,7 @@ const Net = (props) => {
             show: true,
             title: 'Clean this SCP?',
             text: 'Removes all DCM files but keeps the metadata',
-            handleOk: () => dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/cleanscp`, {method: 'DELETE'}, () => {
+            handleOk: () => dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/cleanscp`, {method: 'DELETE', name: node.name}, () => {
                 node.filesCountSCP = undefined
                 setModal({show: false})
             }),
@@ -136,7 +144,7 @@ const Net = (props) => {
             show: true,
             title: 'Clean DCM metadata?',
             text: 'If DCM files are still present in the SCP, metadata will be recollected',
-            handleOk: () => dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file`, {method: 'DELETE', body: {names:[]}}, () => {
+            handleOk: () => dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file`, {method: 'DELETE', name: node.name, body: {names:[]}}, () => {
                 node.filesCountMetadata = undefined
                 setModal({show: false})
             }),
@@ -145,11 +153,11 @@ const Net = (props) => {
     }
 
     const getSCPFiles = () => {
-        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/scpfiles`, {}, files => setSCPFiles(files))
+        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/scpfiles`, {name: node.name}, files => setSCPFiles(files))
     }
     
     const getMetadataFiles = () => {
-        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file`, {}, files => setFiles(files))
+        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file`, {name: node.name}, files => setFiles(files))
     }
 
     const openNet = () => {
@@ -160,7 +168,7 @@ const Net = (props) => {
     const submitNet = () => {
         for(const n of net.nodes){
             const body = { aetitle: newNet.aetitle, name: n.name }
-            dcmFetch(`${n.apiprotocol}://${n.host}:${n.apiport}/config`, {method: 'PUT', body})
+            dcmFetch(`${n.apiprotocol}://${n.host}:${n.apiport}/config`, {method: 'PUT', name: n.name, body})
         }
         updateNet({ ...net, ...newNet })
         setShowNet(false)
@@ -186,7 +194,7 @@ const Net = (props) => {
             })
         const name = node.name
         const body = { aetitle: net.aetitle, name }
-        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/config`, { method: 'PUT', body }, () => {
+        dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/config`, {method: 'PUT', name: node.id, body}, () => {
             const nodes = net.nodes.filter(n => n.id !== node.id)
             nodes.push({ ...node, name, id: name, data: { label: name } })
             updateNet({ ...net, nodes })
@@ -203,7 +211,7 @@ const Net = (props) => {
             name: target.name,
             apiprotocol: target.apiprotocol
         }
-        dcmFetch(`${source.apiprotocol}://${source.host}:${source.apiport}/node`, { method: 'POST', body}, data => {
+        dcmFetch(`${source.apiprotocol}://${source.host}:${source.apiport}/node`, {method: 'POST', name: source.name, body}, data => {
             if(data.msg === 'ok'){
                 source.nodes = source.nodes.filter(n => n.id !== target.id)
                 source.nodes.push({ id: target.id })
@@ -221,7 +229,7 @@ const Net = (props) => {
             handleOk: () => {
                 const source = net.nodes.find(n => n.id === edge.source)
                 const body = { name: edge.target }
-                dcmFetch(`${source.apiprotocol}://${source.host}:${source.apiport}/node`, { method: 'DELETE', body }, () => {
+                dcmFetch(`${source.apiprotocol}://${source.host}:${source.apiport}/node`, {method: 'DELETE', name: source.name, body}, () => {
                     source.nodes = source.nodes.filter(n => n.id !== edge.target)
                     updateNet({ ...net })
                 })
@@ -231,18 +239,28 @@ const Net = (props) => {
     }
 
     const auditNetwork = () => {
+        let nodes = JSON.parse(JSON.stringify(net.nodes))
         setModal({
             show: true, 
             title: 'Network Auditing', 
-            text: 'Checks if any node has failed to synchronize DCM files', 
+            text: (
+                <div style={{textAlign:'left'}}>
+                    {
+                        nodes && nodes.map(node => 
+                            <Form.Check key={`audit-${node.id}`} label={node.name} onChange={e => node.checked = e.target.checked} />
+                        )
+                    }
+                </div>
+            ),
             handleOk: () => {
+                nodes = nodes.filter(node => node.checked)
                 const d = new Date()
                 const now = `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`
                 const items = []
                 const headers = []
-                net.nodes.forEach(node => headers.push(node.name))
-                net.nodes.forEach(node => {
-                    dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file`, {}, files => {
+                nodes.forEach(node => headers.push(node.name))
+                nodes.forEach(node => {
+                    dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/file`, {name: node.name}, files => {
                         if(files){
                             for(const file of files){
                                 const { name, created } = file
@@ -267,8 +285,8 @@ const Net = (props) => {
     }
 
     const testMirrorAPI = () => {
-        dcmFetch(`${mirror.apiprotocol}://${mirror.host}:${mirror.apiport}/status`, { headers: {name: 'mirror'} }, data => {
-            const text = data && data.msg === 'ok' ? 'Mirror API is up and running' : 'Mirror API is unreachable'
+        dcmFetch(`${mirror.apiprotocol}://${mirror.host}:${mirror.apiport}/status`, {name: 'mirror'}, data => {
+            const text = data && data.msg === 'ok' ? 'Ok' : 'Mirror API is unreachable'
             setModal({
                 show: true, 
                 title: 'Testing Mirror API...', 
@@ -285,16 +303,20 @@ const Net = (props) => {
             text: 'Also removes its connections', 
             handleOk: () => {
                 setShowNode(false)
-                dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/node`, { method: 'DELETE', body:{} })
+                dcmFetch(`${node.apiprotocol}://${node.host}:${node.apiport}/node`, {method: 'DELETE', name: node.name, body:{}})
                 const nodes = net.nodes.filter(n => n.id !== node.id)
                 for(const n of nodes){
-                    dcmFetch(`${n.apiprotocol}://${n.host}:${n.apiport}/node`, { method: 'DELETE', body: { name: node.name } })
+                    dcmFetch(`${n.apiprotocol}://${n.host}:${n.apiport}/node`, {method: 'DELETE', name: n.name, body: {name: node.name}})
                     n.nodes = n.nodes.filter(n => n.id !== node.id)
                 }
                 updateNet({ ...net, nodes })
             },
             handleCancel: () => setModal({show: false})
         })
+    }
+
+    const reliabilityTests = () => {
+        setTests({...tests, show: true })
     }
 
     const formEdges = () => {
@@ -308,7 +330,8 @@ const Net = (props) => {
                         target: target.id,
                         markerEnd: { type: MarkerType.ArrowClosed },
                         animated: true,
-                        style: { stroke: 'blue' }
+                        style: { stroke: target.mirrored ? 'red' : 'blue' },
+                        label: target.mirrored ? 'Mirror' : undefined
                     })
                 })
         })
@@ -329,6 +352,9 @@ const Net = (props) => {
                 </Dropdown.Item>
                 <Dropdown.Item onClick={auditNetwork}>
                     <strong>Audit network</strong>
+                </Dropdown.Item>
+                <Dropdown.Item onClick={reliabilityTests}>
+                    <strong>Reliability tests</strong>
                 </Dropdown.Item>
                 <Dropdown.Item onClick={exitNet}>
                     <strong>Exit</strong>
@@ -601,9 +627,8 @@ const Net = (props) => {
                         onClick={submitMirror}>Change</Button>
                 </Modal.Footer>
             </Modal>
-            
             <Audit audit={audit} setAudit={setAudit} />
-            
+            <Tests tests={tests} setTests={setTests} dcmFetch={dcmFetch} />
             <ReactFlow id="flow" nodes={net.nodes} edges={formEdges()} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} 
                 onConnect={onConnect} onEdgeClick={onEdgeClick} fitView>
                 <Background />

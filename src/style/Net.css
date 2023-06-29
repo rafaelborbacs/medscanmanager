@@ -9,6 +9,12 @@
     width:1200px;
     min-width:1200px;
 }
+.modal-tests {
+    width:1000px;
+    min-width:1000px;
+    height: 100%;
+    min-height: 100%;
+}
 .modal-scp-files {
     width:1250px;
     min-width:1250px;
